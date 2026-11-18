@@ -107,7 +107,8 @@ function initMap(){
   if(map)return true;
   if(typeof L==="undefined"){log("Leaflet não carregou (precisa de internet).");return false;}
   map=L.map("map",{zoomControl:true,attributionControl:false}).setView([-23.007,-43.324],14);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(map);
+  // Esri Dark Gray Canvas — sem necessidade de chave de API
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",{maxZoom:16}).addTo(map);
   return true;
 }
 
