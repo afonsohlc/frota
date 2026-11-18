@@ -140,7 +140,8 @@ async function testRotas(){
   }catch(e){log("✗ TESTE bloqueado (CORS): "+e.message+" — precisa do Worker");}
 }
 async function loadRotas(){
-  const url=$("#rotasProxy").value.trim(); if(!url)return;
+  let url=$("#rotasProxy").value.trim(); if(!url)return;
+  if(!/^https?:\/\//i.test(url)) url="https://"+url;
   try{
     const r=await fetch(url,{cache:"no-store"});
     const data=await r.json();
