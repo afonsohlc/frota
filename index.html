@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Frota ao vivo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+  :root{--bg:#0f1115;--panel:#171a21;--card:#1d2129;--line:#2a2f3a;--txt:#e6e8ec;--muted:#9aa3b2;--accent:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--stale:#6b7280}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  #app{display:flex;flex-direction:column;height:100%}
+  header{padding:calc(env(safe-area-inset-top) + 10px) 14px 10px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+  #dot{width:10px;height:10px;border-radius:50%;background:var(--stale);flex:none;transition:.3s}
+  #dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(34,197,94,.18)}#dot.warn{background:var(--warn)}#dot.err{background:var(--err)}
+  header h1{font-size:16px;margin:0;font-weight:650;flex:1}
+  header .st{font-size:12px;color:var(--muted)}
+  .iconbtn{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:7px 11px;font-size:14px;font-weight:600}
+  .iconbtn:active{opacity:.6}
+  #main{flex:1;display:flex;min-height:0}
+  #map{flex:1;min-height:0;background:#0b0d11}
+  #side{width:290px;max-width:46%;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;display:flex;flex-direction:column}
+  #side .h{padding:10px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .veh{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .veh:active{background:var(--card)}
+  .veh.sel{background:var(--card);border-left:3px solid var(--accent)}
+  .veh .top{display:flex;align-items:center;gap:8px}
+  .veh .num{font-weight:700;font-size:15px}
+  .veh .plate{font-size:11px;color:var(--muted);font-family:ui-monospace,Menlo,monospace}
+  .veh .meta{font-size:12px;color:var(--muted);margin-top:3px}
+  .veh .badge{margin-left:auto;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(34,197,94,.15);color:var(--ok)}
+  .veh.old .badge{background:rgba(107,114,128,.2);color:var(--stale)}
+  .veh.old .num{color:var(--muted)}
+  /* settings sheet */
+  #cfg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;z-index:9999}
+  #cfg.open{display:flex}
+  #cfg .sheet{width:100%;background:var(--panel);border-radius:16px 16px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);display:flex;flex-direction:column;gap:10px;max-height:88%;overflow:auto}
+  #cfg h2{margin:0 0 4px;font-size:16px}
+  #cfg label{font-size:11px;color:var(--muted);display:block;margin:6px 0 3px}
+  #cfg input,#cfg textarea{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:10px;font-size:14px;font-family:ui-monospace,Menlo,monospace}
+  #cfg textarea{height:88px;resize:vertical}
+  .note{font-size:11px;color:var(--muted);line-height:1.5}
+  .btn{background:var(--accent);color:#fff;border:0;border-radius:11px;padding:13px;font-size:15px;font-weight:700;width:100%}
+  .btn.sec{background:var(--card);border:1px solid var(--line)}
+  .btn:active{opacity:.7}
+  #log{font:11px/1.4 ui-monospace,Menlo,monospace;color:#8b93a1;background:#0b0d11;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  @media(max-width:620px){#side{position:absolute;right:0;top:0;bottom:0;width:78%;max-width:none;transform:translateX(100%);transition:.25s;z-index:500;box-shadow:-8px 0 24px rgba(0,0,0,.4)}#side.open{transform:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span id="dot"></span>
+    <h1>Frota ao vivo</h1>
+    <span class="st" id="status">parado</span>
+    <button class="iconbtn" id="listBtn">☰</button>
+    <button class="iconbtn" id="cfgBtn">⚙︎</button>
+  </header>
+  <div id="main">
+    <div id="map"></div>
+    <aside id="side">
+      <div class="h" id="sideH">nenhum veículo ainda</div>
+      <div id="list"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="cfg">
+  <div class="sheet">
+    <h2>Configuração</h2>
+    <div>
+      <label>Servidor</label>
+      <input id="host" placeholder="api.orbbus.com.br" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div>
+      <label>Token JWT (cole da sua captura)</label>
+      <textarea id="token" placeholder="eyJ..." autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+      <div class="note">Na captura: requisição <b>login</b> → resposta → campo <b>token</b>. Seu token vale até 2031, então cola uma vez e esquece.</div>
+    </div>
+    <div>
+      <label>Caminho do hub</label>
+      <input id="hubpath" value="/vehiclehub/" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <button class="btn" id="connect">Conectar</button>
+    <button class="btn sec" id="stop">Parar</button>
+    <details>
+      <summary class="note">registro técnico</summary>
+      <div id="log" style="margin-top:8px"></div>
+    </details>
+    <button class="btn sec" id="closeCfg">Fechar</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=s=>document.querySelector(s); const RS="\u001e";
+let ws=null, map=null, markers={}, vehicles={}, selected=null, stopped=false, tick=null;
+
+function log(s){const el=$("#log");if(el){el.textContent+=`[${new Date().toLocaleTimeString("pt-BR")}] ${s}\n`;el.scrollTop=el.scrollHeight;}}
+function setStatus(t,s){$("#status").textContent=t;$("#dot").className=s||"";}
+window.onerror=(m,src,ln)=>{log("JS ERRO: "+m+" @"+ln);setStatus("erro","err");};
+
+function save(){try{localStorage.setItem("frota",JSON.stringify({host:$("#host").value,token:$("#token").value,hubpath:$("#hubpath").value}));}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem("frota")||"{}");for(const k of["host","token","hubpath"])if(d[k])$("#"+k).value=d[k];}catch(e){}}
+
+function initMap(){
+  if(map)return true;
+  if(typeof L==="undefined"){log("Leaflet não carregou (precisa de internet).");return false;}
+  map=L.map("map",{zoomControl:true,attributionControl:false}).setView([-23.007,-43.324],14);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:20,subdomains:"abcd"}).addTo(map);
+  return true;
+}
+
+function busIcon(angle,stale){
+  const col=stale?"#6b7280":"#3b82f6";
+  return L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,15],html:
+    `<div style="width:30px;height:30px;transform:rotate(${angle||0}deg)">
+      <svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 2 L19 20 L12 16 L5 20 Z" fill="${col}" stroke="#0b0d11" stroke-width="1.2"/></svg>
+     </div>`});
+}
+
+function fmtAge(ts){
+  if(!ts)return"";
+  const s=Math.max(0,(Date.now()-new Date(ts).getTime())/1000);
+  if(s<60)return Math.round(s)+"s";
+  if(s<3600)return Math.round(s/60)+"min";
+  return Math.round(s/3600)+"h";
+}
+
+function upsert(v){
+  const id=v.i; if(!(isFinite(v.lat)&&isFinite(v.lng)))return;
+  vehicles[id]={num:v.s,plate:v.p,driver:v.dn||v.un,lat:v.lat,lng:v.lng,speed:v.v,dir:v.d,ts:v.a,gps:v.g,rota:v.rotaStatus,seen:Date.now()};
+  const stale=false;
+  if(markers[id]){markers[id].setLatLng([v.lat,v.lng]).setIcon(busIcon(v.d,stale));}
+  else{markers[id]=L.marker([v.lat,v.lng],{icon:busIcon(v.d,stale)}).addTo(map);
+    markers[id].on("click",()=>selectVeh(id));}
+  markers[id].bindPopup(`<b>${v.s||id}</b><br>${v.p||""}<br>${(v.v||0).toFixed(0)} km/h`);
+  renderList();
+}
+
+function selectVeh(id){
+  selected=id; const v=vehicles[id]; if(v&&map)map.setView([v.lat,v.lng],16);
+  if(markers[id])markers[id].openPopup();
+  renderList(); if(window.innerWidth<=620)$("#side").classList.remove("open");
+}
+
+function renderList(){
+  const ids=Object.keys(vehicles).sort((a,b)=>(vehicles[b].seen)-(vehicles[a].seen));
+  $("#sideH").textContent=ids.length?`${ids.length} veículo(s) · atualiza sozinho`:"aguardando veículos…";
+  $("#list").innerHTML=ids.map(id=>{
+    const v=vehicles[id]; const age=(Date.now()-v.seen)/1000; const old=age>90;
+    return `<div class="veh ${id==selected?"sel":""} ${old?"old":""}" onclick="selectVeh(${JSON.stringify(id)})">
+      <div class="top"><span class="num">${v.num||id}</span>
+        <span class="plate">${v.plate||""}</span>
+        <span class="badge">${old?"parado":Math.round(v.speed||0)+" km/h"}</span></div>
+      <div class="meta">${v.driver?v.driver+" · ":""}há ${fmtAge(v.ts)} ${v.gps?"":"· sem GPS"}</div>
+    </div>`;}).join("");
+}
+window.selectVeh=selectVeh;
+
+let rxbuf="";  // buffer: SignalR records terminam em RS e podem vir fragmentados em vários frames
+function handle(text){
+  rxbuf+=text;
+  const parts=rxbuf.split(RS);
+  rxbuf=parts.pop();            // guarda o pedaço incompleto do fim pro próximo frame
+  parts.forEach(p=>{p=p.trim();if(!p)return;
+    let m;try{m=JSON.parse(p);}catch(e){log("frag descartado: "+p.slice(0,60));return;}
+    if(m.type===6){ws.send('{"type":6}'+RS);return;}
+    if(m.error){log("handshake erro: "+m.error);setStatus("recusado","err");return;}
+    if(m.type===1&&m.target==="UpdateVehicle"){(m.arguments||[]).forEach(upsert);}
+  });
+}
+
+async function getToken(host){
+  const t=$("#token").value.trim(); if(t)return t;
+  throw new Error("cole o token no campo");
+}
+
+async function connect(){
+  stopped=false; save(); if(!initMap())return;
+  const host=$("#host").value.trim().replace(/^https?:\/\//,"").replace(/\/$/,"");
+  if(!host){setStatus("falta servidor","err");log("preencha o servidor");return;}
+  let token; try{token=await getToken(host);}catch(e){setStatus("falta token","err");log("ERRO: "+e.message);return;}
+  setStatus("conectando…","warn"); log("abrindo websocket…");
+  try{
+    const hub=$("#hubpath").value.trim()||"/vehiclehub/";
+    ws=new WebSocket(`wss://${host}${hub}?access_token=${encodeURIComponent(token)}`);
+    ws.onopen=()=>{rxbuf="";ws.send('{"protocol":"json","version":1}'+RS);setStatus("ao vivo","ok");log("conectado ✓");};
+    ws.onmessage=ev=>{typeof ev.data==="string"?handle(ev.data):ev.data.text().then(handle);};
+    ws.onerror=()=>{setStatus("erro de rede","err");log("ws erro");};
+    ws.onclose=ev=>{setStatus("reconectando…","warn");log("ws fechou code="+ev.code);if(!stopped)setTimeout(connect,5000);};
+    $("#cfg").classList.remove("open");
+  }catch(e){setStatus("erro","err");log("ERRO: "+e.message);}
+}
+function stop(){stopped=true;if(ws){ws.close();ws=null;}setStatus("parado","");log("parado");}
+
+$("#connect").onclick=connect;
+$("#stop").onclick=stop;
+$("#cfgBtn").onclick=()=>$("#cfg").classList.add("open");
+$("#closeCfg").onclick=()=>$("#cfg").classList.remove("open");
+$("#listBtn").onclick=()=>$("#side").classList.toggle("open");
+tick=setInterval(renderList,15000); // refresh "há X min" + parado
+
+load(); initMap();
+if($("#token").value.trim()&&$("#host").value.trim()){log("config salva encontrada — conectando");connect();}
+else{$("#cfg").classList.add("open");log("preencha servidor + token e toque em Conectar");}
+</script>
+</body>
+</html>
