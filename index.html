@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Frota ao vivo</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Frota">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   :root{--bg:#0f1115;--panel:#171a21;--card:#1d2129;--line:#2a2f3a;--txt:#e6e8ec;--muted:#9aa3b2;--accent:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--err:#ef4444;--stale:#6b7280}
@@ -24,6 +31,8 @@
   .ctrls{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:33px;background:var(--panel)}
   .ctrls button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px;font-size:12px;font-weight:600}
   .ctrls button:active{opacity:.6}
+  #closeSide{display:none;position:absolute;top:8px;right:10px;z-index:10;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--txt);font-size:16px;line-height:1}
+  #closeSide:active{opacity:.6}
   .veh{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}
   .veh:active{background:var(--card)}
   .veh.sel{background:var(--card);border-left:3px solid var(--accent)}
@@ -51,7 +60,7 @@
   .btn.sec{background:var(--card);border:1px solid var(--line)}
   .btn:active{opacity:.7}
   #log{font:11px/1.4 ui-monospace,Menlo,monospace;color:#8b93a1;background:#0b0d11;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word}
-  @media(max-width:620px){#side{position:absolute;right:0;top:0;bottom:0;width:78%;max-width:none;transform:translateX(100%);transition:.25s;z-index:500;box-shadow:-8px 0 24px rgba(0,0,0,.4)}#side.open{transform:none}}
+  @media(max-width:620px){#side{position:absolute;right:0;top:0;bottom:0;width:82%;max-width:none;transform:translateX(100%);transition:.25s;z-index:500;box-shadow:-8px 0 24px rgba(0,0,0,.4)}#side.open{transform:none}#closeSide{display:block}}
 </style>
 </head>
 <body>
@@ -66,6 +75,7 @@
   <div id="main">
     <div id="map"></div>
     <aside id="side">
+      <button id="closeSide" aria-label="Fechar">✕</button>
       <div class="h" id="sideH">nenhum veículo ainda</div>
       <div class="ctrls">
         <button id="ctrlSort">ordem: recentes</button>
@@ -313,6 +323,7 @@ $("#stop").onclick=stop;
 $("#cfgBtn").onclick=()=>$("#cfg").classList.add("open");
 $("#closeCfg").onclick=()=>$("#cfg").classList.remove("open");
 $("#listBtn").onclick=()=>$("#side").classList.toggle("open");
+$("#closeSide").onclick=()=>$("#side").classList.remove("open");
 $("#ctrlSort").onclick=()=>{sortMode=sortMode==="recent"?"fast":sortMode==="fast"?"num":"recent";renderList();};
 $("#ctrlMove").onclick=()=>{onlyMoving=!onlyMoving;renderList();};
 $("#testRotas").onclick=()=>{$("#log").closest("details").open=true;testRotas();};
