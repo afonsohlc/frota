@@ -46,6 +46,11 @@
   .veh .line.ex{color:#86efac}.veh .line.ex .stt{color:#4ade80}
   .veh .line.ag{color:#fcd34d}.veh .line.cc{color:var(--muted)}
   .veh .badge{margin-left:auto;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(34,197,94,.15);color:var(--ok)}
+  .veh .star{background:none;border:0;color:var(--muted);font-size:17px;padding:0 2px;line-height:1;margin-left:6px}
+  .veh .star.on{color:#fcd34d}
+  #lineFilter{margin:8px 12px;width:calc(100% - 24px);background:var(--bg);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 10px;font-size:13px}
+  #toast{position:fixed;top:calc(env(safe-area-inset-top) + 56px);left:50%;transform:translateX(-50%) translateY(-16px);max-width:90%;background:var(--accent);color:#fff;padding:11px 16px;border-radius:12px;font-size:14px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;pointer-events:none;transition:.25s;z-index:10000;text-align:center}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .veh.old .badge{background:rgba(107,114,128,.2);color:var(--stale)}
   .veh.old .num{color:var(--muted)}
   /* settings sheet */
@@ -75,17 +80,21 @@
     <span id="dot"></span>
     <h1>Frota ao vivo</h1>
     <span class="st" id="status">parado</span>
+    <button class="iconbtn" id="geoBtn" title="Minha localização">📍</button>
     <button class="iconbtn" id="listBtn">☰</button>
     <button class="iconbtn" id="cfgBtn">⚙︎</button>
   </header>
+  <div id="toast"></div>
   <div id="main">
     <div id="map"></div>
     <aside id="side">
       <button id="closeSide" aria-label="Fechar">✕</button>
       <div class="h" id="sideH">nenhum veículo ainda</div>
+      <input id="lineFilter" placeholder="filtrar linha, placa ou nº" autocapitalize="off" autocorrect="off" spellcheck="false">
       <div class="ctrls">
         <button id="ctrlSort">ordem: recentes</button>
         <button id="ctrlMove">○ todos</button>
+        <button id="ctrlFollow">○ seguir</button>
       </div>
       <div id="list"></div>
     </aside>
@@ -121,6 +130,13 @@
       <div class="note">Sem isso, usa a grade embutida (18/11). Com o Worker, a grade do dia é buscada sozinha.</div>
       <button class="btn sec" id="testRotas" style="margin-top:8px">Testar rotas direto (CORS)</button>
     </div>
+    <div>
+      <label>Alertas (com o app aberto)</label>
+      <button class="btn sec" id="alertToggle">○ alertas desligados</button>
+      <label style="margin-top:8px">Raio de aproximação (metros)</label>
+      <input id="alertRadiusInp" type="number" inputmode="numeric" value="500">
+      <div class="note">Favorite linhas/ônibus com a ★ na lista. Com alertas ligados, o celular avisa (som + vibração + banner) quando uma linha favoritada começa ou quando um ônibus dela chega a esse raio de você. Precisa permitir localização e notificações. Funciona com o app aberto.</div>
+    </div>
     <button class="btn" id="connect">Conectar</button>
     <button class="btn sec" id="stop">Parar</button>
     <details>
@@ -137,6 +153,9 @@ const $=s=>document.querySelector(s); const RS="\u001e";
 let ws=null, map=null, markers={}, vehicles={}, trails={}, trailLine=null, selected=null, stopped=false, tick=null;
 let sortMode="recent", onlyMoving=false;  // recent | fast | num
 const MOVING=3; // km/h acima disso = em movimento
+let userPos=null, userMarker=null, follow=false, lineFilter="";
+let favs=[], alertsOn=false, alertRadius=500;
+let prevStatus={}, approachFired={}, ac=null;
 let ROTAS_DATA="18/11 (embutida)";
 let ROTAS={"10194":[{"n":"05:30 (01) CENTRO VIA ALTO IDA","i":"05:28:00","f":"06:28:00","se":1},{"n":"06:30 (01) BARRA VIA ALTO VOLTA","i":"06:30:00","f":"07:55:00","se":2},{"n":"08:00 (01) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"08:00:00","f":"09:45:00","se":1},{"n":"10:00 (01) BARRA VIA J.BOTÂNICO VOLTA","i":"10:00:00","f":"11:26:00","se":2},{"n":"12:20 (01) CENTRO VIA J. BOTÂNICO IDA","i":"12:18:00","f":"14:22:00","se":1},{"n":"14:30 (01) BARRA VIA ALTO VOLTA","i":"14:30:00","f":"15:55:00","se":2},{"n":"16:30 (01) CENTRO VIA COPA. IDA","i":"16:30:00","f":"17:50:00","se":1},{"n":"18:20 (01) BARRA VIA COPA VOLTA","i":"18:20:00","f":"19:30:00","se":2},{"n":"20:10 (01) CIRC. SHOPPING SEG. A SEXTA","i":"20:10:00","f":"21:10:00","se":3}],"10123":[{"n":"05:40 (02) TIJ.CIR/UERJ. - IDA","i":"05:39:00","f":"06:38:00","se":1},{"n":"06:40 (02) TIJ.CIR/UERJ. - VOLTA","i":"06:39:00","f":"07:58:00","se":2},{"n":"08:00 (02) CIRC. SHOPPING CEO SEG. A SEXTA.","i":"08:00:00","f":"09:14:00","se":3},{"n":"09:15 (02) CIRC. SHOPPING SEG. A SEXTA","i":"09:15:00","f":"10:54:00","se":3},{"n":"11:00 (02) CIRC. SHOPPING SEG. A SEXTA","i":"11:00:00","f":"11:57:00","se":3},{"n":"12:00 (02) J. OCEÂNICO/BARRINHA","i":"12:00:00","f":"12:45:00","se":3},{"n":"13:00 (02) CENTRO VIA COPA IDA","i":"13:00:00","f":"14:20:00","se":1},{"n":"17:20 (02) BARRA VIA J.BOTÂNICO VOLTA","i":"17:20:00","f":"18:30:00","se":2}],"10124":[{"n":"06:00 (03) CENTRO VIA COPA / NIEM EXPRESSO IDA","i":"05:59:00","f":"07:08:00","se":1},{"n":"07:00 (03) BARRA VIA J.BOTÂNICO VOLTA","i":"07:00:00","f":"08:00:00","se":2},{"n":"08:10 (03) CENTRO VIA COPA NIEM EXPRESSO IDA","i":"08:10:00","f":"09:55:00","se":1},{"n":"10:50 (06) BARRA VIA J.BOTÂNICO VOLTA","i":"10:50:00","f":"12:30:00","se":2},{"n":"12:40 (06) J. OCEÂNICO/BARRINHA.","i":"12:40:00","f":"13:25:00","se":3},{"n":"13:30 (05) CENTRO VIA ALTO IDA","i":"13:29:00","f":"14:50:00","se":1},{"n":"17:00 (06) BARRA VIA COPA VOLTA","i":"17:00:00","f":"18:20:00","se":2},{"n":"18:30 (06) CENTRO VIA COPA IDA","i":"18:30:00","f":"19:50:00","se":1},{"n":"20:10 (06) BARRA VIA COPA VOLTA","i":"20:10:00","f":"21:40:00","se":2}],"11170":[{"n":"06:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"06:00:00","f":"06:25:00","se":3},{"n":"06:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"06:30:00","f":"06:55:00","se":3},{"n":"07:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"07:00:00","f":"07:25:00","se":3},{"n":"07:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"07:30:00","f":"07:55:00","se":3},{"n":"08:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"08:00:00","f":"08:25:00","se":3},{"n":"08:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"08:30:00","f":"08:55:00","se":3},{"n":"09:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"09:00:00","f":"09:25:00","se":3},{"n":"09:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"09:30:00","f":"09:55:00","se":3},{"n":"10:15 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"10:15:00","f":"11:40:00","se":3},{"n":"12:30 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"12:30:00","f":"13:50:00","se":3},{"n":"14:30 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"14:30:00","f":"15:45:00","se":3}],"10188":[{"n":"06:05 (04) CENTRO VIA ALTO EXPRESSO IDA","i":"06:04:00","f":"07:19:00","se":1},{"n":"07:20 (04) BARRA VIA ALTO VOLTA","i":"07:20:00","f":"08:43:00","se":2},{"n":"08:45 (04) CENTRO VIA ALTO EXPRESSO IDA","i":"08:45:00","f":"10:15:00","se":1},{"n":"10:30 (04) BARRA VIA ALTO VOLTA","i":"10:25:00","f":"11:55:00","se":2},{"n":"12:00 (04) CENTRO VIA COPACABANA IDA","i":"12:00:00","f":"14:03:00","se":1},{"n":"15:30 (04) BARRA VIA J.BOTÂNICO VOLTA","i":"15:30:00","f":"16:55:00","se":2},{"n":"17:40 (04) B.SHOPPING/MERGULHÃO/N. LEBLON","i":"17:40:00","f":"19:30:00","se":3}],"10193":[{"n":"06:10 (05) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:10:00","f":"07:30:00","se":1},{"n":"08:20 (05) CENTRO VIA COPA EXPRESSO IDA","i":"08:20:00","f":"10:04:00","se":1},{"n":"10:20 (05) BARRA VIA COPA VOLTA","i":"10:19:00","f":"12:00:00","se":2},{"n":"12:15 (05) ALFA BARRA/P. ROSAS/N.LEBLON","i":"12:14:00","f":"13:25:00","se":3},{"n":"14:00 (06) CENTRO VIA J.BOTÂNICO IDA","i":"14:00:00","f":"14:55:00","se":1},{"n":"17:45 (05) BARRA VIA ALTO VOLTA","i":"17:45:00","f":"18:50:00","se":2}],"10176":[{"n":"06:20 (09) J. OCEÂNICO/BARRINHA","i":"06:20:00","f":"06:55:00","se":3},{"n":"07:00 (09) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:59:00","f":"08:34:00","se":1},{"n":"09:30 (08) CENTRO VIA COPA EXPRESSO IDA","i":"09:30:00","f":"11:05:00","se":1},{"n":"13:00 (09) BARRA VIA J.BOTÂNICO VOLTA","i":"13:00:00","f":"14:30:00","se":2},{"n":"15:10 (09) COLÉGIO ISRAELITA (BARRINHA)","i":"15:10:00","f":"15:50:00","se":3},{"n":"16:00 (09) CENTRO VIA ALTO IDA","i":"16:00:00","f":"17:25:00","se":1},{"n":"18:15 (09) BARRA VIA J.BOTÂNICO. VOLTA","i":"18:15:00","f":"19:30:00","se":2}],"8469":[{"n":"06:20 (12) ALFA BARRA/P. ROSAS/N. LEBLON","i":"06:19:00","f":"07:10:00","se":3},{"n":"07:50 (12) CENTRO VIA COPA/NIEM EXPRESSO IDA","i":"07:50:00","f":"09:00:00","se":1},{"n":"09:10 (12) BARRA VIA J.BOTÂNICO VOLTA","i":"09:10:00","f":"10:40:00","se":2},{"n":"10:45 (12) CENTRO VIA J. BOTÂNICO IDA","i":"10:45:00","f":"12:35:00","se":1},{"n":"12:45 (12) BARRA VIA COPA VOLTA","i":"12:45:00","f":"14:15:00","se":2},{"n":"14:30 (12) CENTRO VIA COPA IDA","i":"14:28:00","f":"16:00:00","se":1},{"n":"16:15 (12) BARRA VIA COPA. VOLTA","i":"16:15:00","f":"18:00:00","se":2},{"n":"18:40 (12) CIRC. SHOPPING SEG. A SEXTA","i":"18:40:00","f":"19:37:00","se":3},{"n":"19:40 (12) CENTRO VIA COPA IDA","i":"19:40:00","f":"20:50:00","se":1},{"n":"21:30 (12) BARRA UERJ/ VIA COPA VOLTA","i":"21:30:00","f":"23:00:00","se":2}],"10192":[{"n":"06:25 (10) NOVO LEBLON PISTA INTERNA","i":"06:25:00","f":"07:00:00","se":3},{"n":"07:15 (10) CENTRO VIA COPA EXPRESSO IDA","i":"07:14:00","f":"08:45:00","se":1},{"n":"09:20 (10) BARRA VIA COPA VOLTA","i":"09:20:00","f":"10:50:00","se":2},{"n":"11:00 (10) CENTRO VIA ALTO IDA","i":"11:00:00","f":"12:25:00","se":1},{"n":"16:00 (10) BARRA VIA ALTO VOLTA","i":"16:00:00","f":"17:25:00","se":2},{"n":"18:00 (10) CENTRO VIA ALTO IDA","i":"18:00:00","f":"19:05:00","se":1},{"n":"19:40 (10) BARRA VIA J.BOTÂNICO VOLTA","i":"19:40:00","f":"20:40:00","se":2}],"8677":[{"n":"06:30 (06) CENTRO COPA/NIEM EXPRESSO IDA","i":"06:29:00","f":"07:46:00","se":1},{"n":"07:45 (06) BARRA VIA COPA VOLTA","i":"07:45:00","f":"08:55:00","se":2},{"n":"09:15 (06) CENTRO VIA COPA NIEM EXPRESSO IDA","i":"09:15:00","f":"10:40:00","se":1},{"n":"11:15 (03) BARRA VIA COPA VOLTA","i":"11:15:00","f":"12:25:00","se":2}],"10106":[{"n":"06:40 (07) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:39:00","f":"08:13:00","se":1},{"n":"09:00 (07) CENTRO VIA J.BOTÂNICO EXPRESSO IDA","i":"09:00:00","f":"10:25:00","se":1},{"n":"15:00 (07) BARRA VIA COPA VOLTA","i":"15:00:00","f":"16:20:00","se":2},{"n":"17:00 (07) CENTRO VIA COPA IDA","i":"17:00:00","f":"18:00:00","se":1},{"n":"18:50 (07) BARRA VIA COPA VOLTA","i":"18:50:00","f":"20:20:00","se":2}],"498":[{"n":"06:50 (08) CENTRO VIA ALTO EXPRESSO IDA","i":"06:49:00","f":"08:24:00","se":1},{"n":"09:40 (09) CENTRO VIA ALTO EXPRESSO IDA","i":"09:40:00","f":"11:03:00","se":1},{"n":"12:20 (08) BARRA VIA ALTO VOLTA","i":"12:19:00","f":"14:00:00","se":2},{"n":"15:30 (08) CIRC. SHOPPING SEG. A SEXTA","i":"15:30:00","f":"16:30:00","se":3},{"n":"17:00 (08) CENTRO VIA ALTO IDA","i":"17:00:00","f":"18:20:00","se":1},{"n":"18:40 (08) BARRA VIA ALTO VOLTA","i":"18:40:00","f":"20:00:00","se":2}],"8470":[{"n":"07:30 (11) CENTRO VIA ALTO EXP. IDA","i":"07:30:00","f":"08:50:00","se":1},{"n":"09:00 (11) BARRA VIA ALTO VOLTA","i":"08:59:00","f":"10:30:00","se":2},{"n":"11:50 (11) N. LEBLON/ B. MALL PISTA CENTRAL","i":"11:50:00","f":"12:30:00","se":3},{"n":"12:50 (11) BARRA MALL/CEC/BARRASHOPPING","i":"12:49:00","f":"14:10:00","se":3},{"n":"15:00 (11) CENTRO VIA J. BOTÂNICO IDA","i":"15:00:00","f":"16:20:00","se":1},{"n":"17:10 (11) BARRA VIA ALTO VOLTA","i":"17:10:00","f":"18:20:00","se":2},{"n":"18:40 (11) CENTRO VIA ALTO IDA","i":"18:40:00","f":"20:00:00","se":1},{"n":"20:20 (11) BARRA VIA ALTO VOLTA","i":"20:20:00","f":"21:50:00","se":2}],"0":[{"n":"08:15 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"09:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"10:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"12:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"13:30 (03) CIRC. SHOPPING CEO SEG. A SEXTA.","i":null,"f":null,"se":3},{"n":"13:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"14:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"14:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO.","i":null,"f":null,"se":3},{"n":"16:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"16:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"17:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"17:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"18:30 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"18:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"20:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"21:00 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"PORTARIA CANAL ABM","i":null,"f":null,"se":3},{"n":"PORTARIA SEDE ABM","i":null,"f":null,"se":3},{"n":"TESTE ORBITAL","i":null,"f":null,"se":3},{"n":"15:30 (03) CENTRO VIA COPA IDA","i":"15:30:00","f":"16:50:00","se":1},{"n":"17:45 (03) BARRA VIA COPA VOLTA","i":"17:45:00","f":"18:50:00","se":2}]};
 async function testRotas(){
@@ -187,8 +206,13 @@ function log(s){const el=$("#log");if(el){el.textContent+=`[${new Date().toLocal
 function setStatus(t,s){$("#status").textContent=t;$("#dot").className=s||"";}
 window.onerror=(m,src,ln)=>{log("JS ERRO: "+m+" @"+ln);setStatus("erro","err");};
 
-function save(){try{localStorage.setItem("frota",JSON.stringify({host:$("#host").value,uid:$("#uid").value,pwd:$("#pwd").value,token:$("#token").value,hubpath:$("#hubpath").value,rotasProxy:$("#rotasProxy").value}));}catch(e){}}
-function load(){try{const d=JSON.parse(localStorage.getItem("frota")||"{}");for(const k of["host","uid","pwd","token","hubpath","rotasProxy"])if(d[k])$("#"+k).value=d[k];}catch(e){}}
+function save(){try{localStorage.setItem("frota",JSON.stringify({host:$("#host").value,uid:$("#uid").value,pwd:$("#pwd").value,token:$("#token").value,hubpath:$("#hubpath").value,rotasProxy:$("#rotasProxy").value,favs,alertsOn,alertRadius}));}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem("frota")||"{}");
+  for(const k of["host","uid","pwd","token","hubpath","rotasProxy"])if(d[k]!=null&&$("#"+k))$("#"+k).value=d[k];
+  if(Array.isArray(d.favs))favs=d.favs;
+  if(typeof d.alertsOn==="boolean")alertsOn=d.alertsOn;
+  if(d.alertRadius)alertRadius=d.alertRadius;
+}catch(e){}}
 
 function initMap(){
   if(map)return true;
@@ -216,6 +240,46 @@ function fmtAge(ts){
   return Math.round(s/3600)+"h";
 }
 
+// ---------- distância / localização ----------
+function distM(a,b,c,d){const R=6371000,p=Math.PI/180;
+  const dLat=(c-a)*p,dLng=(d-b)*p;
+  const x=Math.sin(dLat/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));}
+function fmtDist(m){return m<1000?Math.round(m)+" m":(m/1000).toFixed(1).replace(".",",")+" km";}
+function distTo(v){return userPos?distM(userPos.lat,userPos.lng,v.lat,v.lng):null;}
+function startGeo(){
+  if(!navigator.geolocation){log("sem geolocalização");return;}
+  navigator.geolocation.watchPosition(p=>{
+    userPos={lat:p.coords.latitude,lng:p.coords.longitude};
+    drawUser(); renderList();
+  }, e=>log("geo erro: "+e.message), {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
+}
+function drawUser(){
+  if(!userPos||!map)return;
+  const ll=[userPos.lat,userPos.lng];
+  if(userMarker)userMarker.setLatLng(ll);
+  else userMarker=L.circleMarker(ll,{radius:7,color:"#fff",weight:2,fillColor:"#3b82f6",fillOpacity:1}).addTo(map);
+}
+// ---------- alertas (app aberto) ----------
+function beep(){try{ac=ac||new(window.AudioContext||window.webkitAudioContext)();const o=ac.createOscillator(),g=ac.createGain();o.connect(g);g.connect(ac.destination);o.type="sine";o.frequency.value=880;g.gain.value=.12;o.start();o.frequency.setValueAtTime(660,ac.currentTime+.15);o.stop(ac.currentTime+.3);}catch(e){}}
+function toast(msg){const t=$("#toast");if(!t)return;t.textContent=msg;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),6000);}
+function notify(title,body){
+  try{navigator.vibrate&&navigator.vibrate([200,100,200]);}catch(e){}
+  beep(); toast(title+" — "+body);
+  if(window.Notification&&Notification.permission==="granted"){try{new Notification(title,{body,icon:"icon-192.png"});}catch(e){}}
+}
+function checkAlerts(id){
+  const v=vehicles[id], num=String(v.num);
+  const ln=lineFor(id), st=ln&&ln.status;
+  if(alertsOn&&favs.includes(num)){
+    if(st==="Executando"&&prevStatus[id]&&prevStatus[id]!=="Executando") notify("Linha começou", num+" · "+(ln?ln.nome:""));
+    if(userPos){const d=distTo(v);
+      if(d<=alertRadius){ if(!approachFired[num]){approachFired[num]=true; notify("Ônibus chegando", num+" a "+fmtDist(d)+" de você");} }
+      else if(d>alertRadius*1.4){ approachFired[num]=false; }}
+  }
+  prevStatus[id]=st;
+}
+
 function upsert(v){
   const id=v.i; if(!(isFinite(v.lat)&&isFinite(v.lng)))return;
   vehicles[id]={num:v.s,plate:v.p,driver:v.dn||v.un,lat:v.lat,lng:v.lng,speed:v.v,dir:v.d,ts:v.a,gps:v.g,rota:v.rotaStatus,seen:Date.now()};
@@ -226,9 +290,11 @@ function upsert(v){
   if(markers[id]){markers[id].setLatLng([v.lat,v.lng]).setIcon(busIcon(v.d,false,sel));}
   else{markers[id]=L.marker([v.lat,v.lng],{icon:busIcon(v.d,false,sel)}).addTo(map);
     markers[id].on("click",()=>selectVeh(id));}
-  const ln=lineFor(id);
-  markers[id].bindPopup(`<b>${v.s||id}</b> ${v.p||""}<br>${ln?ln.nome+"<br><i>"+ln.status+"</i><br>":""}${(v.v||0).toFixed(0)} km/h`);
+  const ln=lineFor(id); const d=distTo(vehicles[id]);
+  markers[id].bindPopup(`<b>${v.s||id}</b> ${v.p||""}<br>${ln?ln.nome+"<br><i>"+ln.status+"</i><br>":""}${(v.v||0).toFixed(0)} km/h${d!=null?"<br>a "+fmtDist(d)+" de você":""}`);
   if(sel)drawTrail(id);
+  if(follow&&sel&&map)map.panTo([v.lat,v.lng]);
+  checkAlerts(id);
   renderList();
 }
 
@@ -252,7 +318,12 @@ function selectVeh(id){
 function renderList(){
   let ids=Object.keys(vehicles);
   if(onlyMoving) ids=ids.filter(id=>(vehicles[id].speed||0)>=MOVING);
+  if(lineFilter){const q=lineFilter.toLowerCase();
+    ids=ids.filter(id=>{const v=vehicles[id],ln=lineFor(id);
+      return String(v.num).toLowerCase().includes(q)||String(v.plate||"").toLowerCase().includes(q)||(ln&&ln.nome.toLowerCase().includes(q));});}
   ids.sort((a,b)=>{
+    const fa=favs.includes(String(vehicles[a].num)),fb=favs.includes(String(vehicles[b].num));
+    if(fa!==fb)return fa?-1:1;                       // favoritos sempre no topo
     if(sortMode==="fast") return (vehicles[b].speed||0)-(vehicles[a].speed||0);
     if(sortMode==="num")  return String(vehicles[a].num).localeCompare(String(vehicles[b].num),undefined,{numeric:true});
     return vehicles[b].seen-vehicles[a].seen; // recent
@@ -262,20 +333,28 @@ function renderList(){
   const sortLbl={recent:"recentes",fast:"+ rápidos",num:"nº"}[sortMode];
   $("#ctrlSort").textContent="ordem: "+sortLbl;
   $("#ctrlMove").textContent=onlyMoving?"● só andando":"○ todos";
+  $("#ctrlFollow").textContent=follow?"● seguir":"○ seguir";
   $("#list").innerHTML=ids.map(id=>{
     const v=vehicles[id]; const age=(Date.now()-v.seen)/1000; const old=age>90;
-    const ln=lineFor(id);
+    const ln=lineFor(id); const num=String(v.num);
     const stCls={Executando:"ex",Aguardando:"ag","Concluída":"cc"}[ln&&ln.status]||"";
     const lineHtml=ln?`<div class="line ${stCls}">${ln.nome} <span class="stt">· ${ln.status}</span></div>`:"";
+    const d=distTo(v); const distHtml=d!=null?` · a ${fmtDist(d)}`:"";
+    const star=favs.includes(num)?"★":"☆";
     return `<div class="veh ${id==selected?"sel":""} ${old?"old":""}" onclick="selectVeh(${JSON.stringify(id)})">
       <div class="top"><span class="num">${v.num||id}</span>
         <span class="plate">${v.plate||""}</span>
-        <span class="badge">${old?"parado":Math.round(v.speed||0)+" km/h"}</span></div>
+        <span class="badge">${old?"parado":Math.round(v.speed||0)+" km/h"}</span>
+        <button class="star ${favs.includes(num)?"on":""}" onclick="toggleFav(event,${JSON.stringify(num)})">${star}</button></div>
       ${lineHtml}
-      <div class="meta">${v.driver?v.driver+" · ":""}há ${fmtAge(v.ts)} ${v.gps?"":"· sem GPS"}</div>
+      <div class="meta">${v.driver?v.driver+" · ":""}há ${fmtAge(v.ts)}${distHtml}${v.gps?"":" · sem GPS"}</div>
     </div>`;}).join("");
 }
 window.selectVeh=selectVeh;
+function toggleFav(ev,num){ev.stopPropagation();
+  const i=favs.indexOf(num); if(i>=0)favs.splice(i,1); else favs.push(num);
+  save(); renderList();}
+window.toggleFav=toggleFav;
 
 let rxbuf="";  // buffer: SignalR records terminam em RS e podem vir fragmentados em vários frames
 function handle(text){
@@ -332,11 +411,28 @@ $("#listBtn").onclick=()=>$("#side").classList.toggle("open");
 $("#closeSide").onclick=()=>$("#side").classList.remove("open");
 $("#ctrlSort").onclick=()=>{sortMode=sortMode==="recent"?"fast":sortMode==="fast"?"num":"recent";renderList();};
 $("#ctrlMove").onclick=()=>{onlyMoving=!onlyMoving;renderList();};
+$("#ctrlFollow").onclick=()=>{follow=!follow;if(follow&&selected&&vehicles[selected])map.panTo([vehicles[selected].lat,vehicles[selected].lng]);renderList();};
+$("#lineFilter").oninput=e=>{lineFilter=e.target.value.trim();renderList();};
+$("#geoBtn").onclick=()=>{startGeo();if(userPos&&map)map.setView([userPos.lat,userPos.lng],15);};
+$("#alertRadiusInp").onchange=e=>{alertRadius=parseInt(e.target.value)||500;save();};
+$("#alertToggle").onclick=async()=>{
+  alertsOn=!alertsOn;
+  if(alertsOn){
+    startGeo();
+    if(window.Notification&&Notification.permission==="default"){try{await Notification.requestPermission();}catch(e){}}
+    beep(); // destrava o áudio no gesto do usuário
+  }
+  $("#alertToggle").textContent=alertsOn?"● alertas ligados":"○ alertas desligados";
+  save();
+};
 $("#testRotas").onclick=()=>{$("#log").closest("details").open=true;testRotas();};
 tick=setInterval(renderList,15000); // refresh "há X min" + parado
 setInterval(loadRotas,300000);      // atualiza a grade a cada 5 min (se proxy configurado)
 
 load(); initMap();
+$("#alertRadiusInp").value=alertRadius;
+$("#alertToggle").textContent=alertsOn?"● alertas ligados":"○ alertas desligados";
+if(alertsOn)startGeo();
 const temCred=$("#token").value.trim()||($("#uid").value.trim()&&$("#pwd").value);
 if(temCred&&$("#host").value.trim()){log("config salva encontrada — conectando");connect();}
 else{$("#cfg").classList.add("open");log("preencha servidor + token e toque em Conectar");}
