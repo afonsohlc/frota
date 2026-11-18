@@ -247,11 +247,15 @@ function distM(a,b,c,d){const R=6371000,p=Math.PI/180;
   return 2*R*Math.asin(Math.sqrt(x));}
 function fmtDist(m){return m<1000?Math.round(m)+" m":(m/1000).toFixed(1).replace(".",",")+" km";}
 function distTo(v){return userPos?distM(userPos.lat,userPos.lng,v.lat,v.lng):null;}
+let geoStarted=false, geoCentered=false;
 function startGeo(){
-  if(!navigator.geolocation){log("sem geolocalização");return;}
+  if(geoStarted)return; if(!navigator.geolocation){log("sem geolocalização");return;}
+  geoStarted=true;
   navigator.geolocation.watchPosition(p=>{
     userPos={lat:p.coords.latitude,lng:p.coords.longitude};
-    drawUser(); renderList();
+    drawUser();
+    if(!geoCentered&&map){map.setView([userPos.lat,userPos.lng],15);geoCentered=true;}
+    renderList();
   }, e=>log("geo erro: "+e.message), {enableHighAccuracy:true,maximumAge:5000,timeout:20000});
 }
 function drawUser(){
@@ -341,20 +345,22 @@ function renderList(){
     const lineHtml=ln?`<div class="line ${stCls}">${ln.nome} <span class="stt">· ${ln.status}</span></div>`:"";
     const d=distTo(v); const distHtml=d!=null?` · a ${fmtDist(d)}`:"";
     const star=favs.includes(num)?"★":"☆";
-    return `<div class="veh ${id==selected?"sel":""} ${old?"old":""}" onclick="selectVeh(${JSON.stringify(id)})">
+    return `<div class="veh ${id==selected?"sel":""} ${old?"old":""}" data-id="${id}">
       <div class="top"><span class="num">${v.num||id}</span>
         <span class="plate">${v.plate||""}</span>
         <span class="badge">${old?"parado":Math.round(v.speed||0)+" km/h"}</span>
-        <button class="star ${favs.includes(num)?"on":""}" onclick="toggleFav(event,${JSON.stringify(num)})">${star}</button></div>
+        <button class="star ${favs.includes(num)?"on":""}" data-fav="${num}">${star}</button></div>
       ${lineHtml}
       <div class="meta">${v.driver?v.driver+" · ":""}há ${fmtAge(v.ts)}${distHtml}${v.gps?"":" · sem GPS"}</div>
     </div>`;}).join("");
 }
-window.selectVeh=selectVeh;
-function toggleFav(ev,num){ev.stopPropagation();
-  const i=favs.indexOf(num); if(i>=0)favs.splice(i,1); else favs.push(num);
-  save(); renderList();}
-window.toggleFav=toggleFav;
+function toggleFav(num){const i=favs.indexOf(num);if(i>=0)favs.splice(i,1);else favs.push(num);save();renderList();}
+$("#list").addEventListener("click",e=>{
+  const star=e.target.closest(".star");
+  if(star){e.stopPropagation();toggleFav(star.dataset.fav);return;}
+  const card=e.target.closest(".veh");
+  if(card)selectVeh(card.dataset.id);
+});
 
 let rxbuf="";  // buffer: SignalR records terminam em RS e podem vir fragmentados em vários frames
 function handle(text){
@@ -432,7 +438,7 @@ setInterval(loadRotas,300000);      // atualiza a grade a cada 5 min (se proxy c
 load(); initMap();
 $("#alertRadiusInp").value=alertRadius;
 $("#alertToggle").textContent=alertsOn?"● alertas ligados":"○ alertas desligados";
-if(alertsOn)startGeo();
+startGeo();  // já abre pedindo localização e centraliza em você
 const temCred=$("#token").value.trim()||($("#uid").value.trim()&&$("#pwd").value);
 if(temCred&&$("#host").value.trim()){log("config salva encontrada — conectando");connect();}
 else{$("#cfg").classList.add("open");log("preencha servidor + token e toque em Conectar");}
