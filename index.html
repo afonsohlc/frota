@@ -21,6 +21,9 @@
   #map{flex:1;min-height:0;background:#0b0d11}
   #side{width:290px;max-width:46%;background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;display:flex;flex-direction:column}
   #side .h{padding:10px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  .ctrls{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);position:sticky;top:33px;background:var(--panel)}
+  .ctrls button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px;font-size:12px;font-weight:600}
+  .ctrls button:active{opacity:.6}
   .veh{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}
   .veh:active{background:var(--card)}
   .veh.sel{background:var(--card);border-left:3px solid var(--accent)}
@@ -60,6 +63,10 @@
     <div id="map"></div>
     <aside id="side">
       <div class="h" id="sideH">nenhum veículo ainda</div>
+      <div class="ctrls">
+        <button id="ctrlSort">ordem: recentes</button>
+        <button id="ctrlMove">○ todos</button>
+      </div>
       <div id="list"></div>
     </aside>
   </div>
@@ -94,7 +101,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const $=s=>document.querySelector(s); const RS="\u001e";
-let ws=null, map=null, markers={}, vehicles={}, selected=null, stopped=false, tick=null;
+let ws=null, map=null, markers={}, vehicles={}, trails={}, trailLine=null, selected=null, stopped=false, tick=null;
+let sortMode="recent", onlyMoving=false;  // recent | fast | num
+const MOVING=3; // km/h acima disso = em movimento
 
 function log(s){const el=$("#log");if(el){el.textContent+=`[${new Date().toLocaleTimeString("pt-BR")}] ${s}\n`;el.scrollTop=el.scrollHeight;}}
 function setStatus(t,s){$("#status").textContent=t;$("#dot").className=s||"";}
@@ -112,11 +121,12 @@ function initMap(){
   return true;
 }
 
-function busIcon(angle,stale){
-  const col=stale?"#6b7280":"#3b82f6";
-  return L.divIcon({className:"",iconSize:[30,30],iconAnchor:[15,15],html:
-    `<div style="width:30px;height:30px;transform:rotate(${angle||0}deg)">
-      <svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 2 L19 20 L12 16 L5 20 Z" fill="${col}" stroke="#0b0d11" stroke-width="1.2"/></svg>
+function busIcon(angle,stale,sel){
+  const col=sel?"#f59e0b":(stale?"#6b7280":"#3b82f6");
+  const sz=sel?48:40;
+  return L.divIcon({className:"",iconSize:[sz,sz],iconAnchor:[sz/2,sz/2],html:
+    `<div style="width:${sz}px;height:${sz}px;transform:rotate(${angle||0}deg)">
+      <svg viewBox="0 0 24 24" width="${sz}" height="${sz}"><path d="M12 2 L19 20 L12 16 L5 20 Z" fill="${col}" stroke="#0b0d11" stroke-width="1.4"/></svg>
      </div>`});
 }
 
@@ -131,23 +141,48 @@ function fmtAge(ts){
 function upsert(v){
   const id=v.i; if(!(isFinite(v.lat)&&isFinite(v.lng)))return;
   vehicles[id]={num:v.s,plate:v.p,driver:v.dn||v.un,lat:v.lat,lng:v.lng,speed:v.v,dir:v.d,ts:v.a,gps:v.g,rota:v.rotaStatus,seen:Date.now()};
-  const stale=false;
-  if(markers[id]){markers[id].setLatLng([v.lat,v.lng]).setIcon(busIcon(v.d,stale));}
-  else{markers[id]=L.marker([v.lat,v.lng],{icon:busIcon(v.d,stale)}).addTo(map);
+  // rastro: só guarda se a posição mudou de verdade
+  const tr=trails[id]||(trails[id]=[]); const last=tr[tr.length-1];
+  if(!last||last[0]!==v.lat||last[1]!==v.lng){tr.push([v.lat,v.lng]); if(tr.length>60)tr.shift();}
+  const sel=(id==selected);
+  if(markers[id]){markers[id].setLatLng([v.lat,v.lng]).setIcon(busIcon(v.d,false,sel));}
+  else{markers[id]=L.marker([v.lat,v.lng],{icon:busIcon(v.d,false,sel)}).addTo(map);
     markers[id].on("click",()=>selectVeh(id));}
   markers[id].bindPopup(`<b>${v.s||id}</b><br>${v.p||""}<br>${(v.v||0).toFixed(0)} km/h`);
+  if(sel)drawTrail(id);
   renderList();
+}
+
+function drawTrail(id){
+  if(trailLine){map.removeLayer(trailLine);trailLine=null;}
+  const pts=trails[id]; if(pts&&pts.length>1)
+    trailLine=L.polyline(pts,{color:"#f59e0b",weight:3,opacity:.8}).addTo(map);
+}
+
+function refreshIcons(){ // reaplica cor/tamanho (seleção muda o destaque)
+  for(const id in markers) markers[id].setIcon(busIcon(vehicles[id].dir,false,id==selected));
 }
 
 function selectVeh(id){
   selected=id; const v=vehicles[id]; if(v&&map)map.setView([v.lat,v.lng],16);
+  refreshIcons(); drawTrail(id);
   if(markers[id])markers[id].openPopup();
   renderList(); if(window.innerWidth<=620)$("#side").classList.remove("open");
 }
 
 function renderList(){
-  const ids=Object.keys(vehicles).sort((a,b)=>(vehicles[b].seen)-(vehicles[a].seen));
-  $("#sideH").textContent=ids.length?`${ids.length} veículo(s) · atualiza sozinho`:"aguardando veículos…";
+  let ids=Object.keys(vehicles);
+  if(onlyMoving) ids=ids.filter(id=>(vehicles[id].speed||0)>=MOVING);
+  ids.sort((a,b)=>{
+    if(sortMode==="fast") return (vehicles[b].speed||0)-(vehicles[a].speed||0);
+    if(sortMode==="num")  return String(vehicles[a].num).localeCompare(String(vehicles[b].num),undefined,{numeric:true});
+    return vehicles[b].seen-vehicles[a].seen; // recent
+  });
+  const total=Object.keys(vehicles).length;
+  $("#sideH").textContent=total?`${onlyMoving?ids.length+" em movimento · ":""}${total} veículo(s)`:"aguardando veículos…";
+  const sortLbl={recent:"recentes",fast:"+ rápidos",num:"nº"}[sortMode];
+  $("#ctrlSort").textContent="ordem: "+sortLbl;
+  $("#ctrlMove").textContent=onlyMoving?"● só andando":"○ todos";
   $("#list").innerHTML=ids.map(id=>{
     const v=vehicles[id]; const age=(Date.now()-v.seen)/1000; const old=age>90;
     return `<div class="veh ${id==selected?"sel":""} ${old?"old":""}" onclick="selectVeh(${JSON.stringify(id)})">
@@ -200,6 +235,8 @@ $("#stop").onclick=stop;
 $("#cfgBtn").onclick=()=>$("#cfg").classList.add("open");
 $("#closeCfg").onclick=()=>$("#cfg").classList.remove("open");
 $("#listBtn").onclick=()=>$("#side").classList.toggle("open");
+$("#ctrlSort").onclick=()=>{sortMode=sortMode==="recent"?"fast":sortMode==="fast"?"num":"recent";renderList();};
+$("#ctrlMove").onclick=()=>{onlyMoving=!onlyMoving;renderList();};
 tick=setInterval(renderList,15000); // refresh "há X min" + parado
 
 load(); initMap();
