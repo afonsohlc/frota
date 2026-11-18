@@ -84,10 +84,17 @@
       <input id="host" placeholder="api.orbbus.com.br" autocapitalize="off" autocorrect="off" spellcheck="false">
     </div>
     <div>
-      <label>Token JWT (cole da sua captura)</label>
-      <textarea id="token" placeholder="eyJ..." autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
-      <div class="note">Na captura: requisição <b>login</b> → resposta → campo <b>token</b>. Seu token vale até 2031, então cola uma vez e esquece.</div>
+      <label>E-mail</label>
+      <input id="uid" placeholder="email@exemplo.com" type="email" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <label style="margin-top:6px">Senha</label>
+      <input id="pwd" placeholder="senha" type="password" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <div class="note">Faz o login e pega o token sozinho. Se der erro de rede/CORS, use o token abaixo.</div>
     </div>
+    <details>
+      <summary class="note">ou colar o token direto</summary>
+      <textarea id="token" placeholder="eyJ..." autocapitalize="off" autocorrect="off" spellcheck="false" style="margin-top:6px"></textarea>
+      <div class="note">Na captura: requisição <b>login</b> → resposta → campo <b>token</b>. Vale até 2031.</div>
+    </details>
     <div>
       <label>Caminho do hub</label>
       <input id="hubpath" value="/vehiclehub/" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -146,8 +153,8 @@ function log(s){const el=$("#log");if(el){el.textContent+=`[${new Date().toLocal
 function setStatus(t,s){$("#status").textContent=t;$("#dot").className=s||"";}
 window.onerror=(m,src,ln)=>{log("JS ERRO: "+m+" @"+ln);setStatus("erro","err");};
 
-function save(){try{localStorage.setItem("frota",JSON.stringify({host:$("#host").value,token:$("#token").value,hubpath:$("#hubpath").value,rotasProxy:$("#rotasProxy").value}));}catch(e){}}
-function load(){try{const d=JSON.parse(localStorage.getItem("frota")||"{}");for(const k of["host","token","hubpath","rotasProxy"])if(d[k])$("#"+k).value=d[k];}catch(e){}}
+function save(){try{localStorage.setItem("frota",JSON.stringify({host:$("#host").value,uid:$("#uid").value,pwd:$("#pwd").value,token:$("#token").value,hubpath:$("#hubpath").value,rotasProxy:$("#rotasProxy").value}));}catch(e){}}
+function load(){try{const d=JSON.parse(localStorage.getItem("frota")||"{}");for(const k of["host","uid","pwd","token","hubpath","rotasProxy"])if(d[k])$("#"+k).value=d[k];}catch(e){}}
 
 function initMap(){
   if(map)return true;
@@ -251,7 +258,17 @@ function handle(text){
 
 async function getToken(host){
   const t=$("#token").value.trim(); if(t)return t;
-  throw new Error("cole o token no campo");
+  const id=$("#uid").value.trim(), pw=$("#pwd").value;
+  if(id&&pw){
+    log("login com e-mail/senha…");
+    const r=await fetch(`https://${host}/api/login/authenticate`,{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({ID:id,Password:pw})});
+    if(!r.ok)throw new Error("login HTTP "+r.status);
+    const d=await r.json();
+    if(!d.token)throw new Error("login sem token");
+    log("login ok ✓"); return d.token;
+  }
+  throw new Error("preencha e-mail+senha ou cole o token");
 }
 
 async function connect(){
@@ -284,7 +301,8 @@ tick=setInterval(renderList,15000); // refresh "há X min" + parado
 setInterval(loadRotas,300000);      // atualiza a grade a cada 5 min (se proxy configurado)
 
 load(); initMap();
-if($("#token").value.trim()&&$("#host").value.trim()){log("config salva encontrada — conectando");connect();}
+const temCred=$("#token").value.trim()||($("#uid").value.trim()&&$("#pwd").value);
+if(temCred&&$("#host").value.trim()){log("config salva encontrada — conectando");connect();}
 else{$("#cfg").classList.add("open");log("preencha servidor + token e toque em Conectar");}
 </script>
 </body>
