@@ -67,10 +67,10 @@
   .btn:active{opacity:.7}
   #log{font:11px/1.4 ui-monospace,Menlo,monospace;color:#8b93a1;background:#0b0d11;border:1px solid var(--line);border-radius:9px;padding:8px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word}
   .veh .info{background:none;border:0;color:var(--muted);font-size:15px;padding:0 2px;line-height:1;margin-left:4px}
-  #detail{position:fixed;inset:0;display:none;align-items:flex-end;z-index:10001}
-  #detail.open{display:flex}
-  #detail .dbackdrop{position:absolute;inset:0;background:rgba(0,0,0,.6)}
-  #detail .sheet{position:relative;width:100%;background:var(--panel);border-radius:16px 16px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);max-height:85%;overflow:auto}
+  #detail,#sched{position:fixed;inset:0;display:none;align-items:flex-end;z-index:10001}
+  #detail.open,#sched.open{display:flex}
+  #detail .dbackdrop,#sched .dbackdrop{position:absolute;inset:0;background:rgba(0,0,0,.6)}
+  #detail .sheet,#sched .sheet{position:relative;width:100%;background:var(--panel);border-radius:16px 16px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px);max-height:85%;overflow:auto}
   .dh{display:flex;align-items:center;gap:8px;font-size:17px;margin-bottom:10px}
   .drow{border-top:1px solid var(--line);padding:10px 0;font-size:14px}
   .dlbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:4px}
@@ -94,6 +94,7 @@
     <span id="dot"></span>
     <h1>Frota ao vivo</h1>
     <span class="st" id="status">parado</span>
+    <button class="iconbtn" id="schedBtn" title="Horários no meu ponto">🕐</button>
     <button class="iconbtn" id="geoBtn" title="Minha localização">📍</button>
     <button class="iconbtn" id="listBtn">☰</button>
     <button class="iconbtn" id="cfgBtn">⚙︎</button>
@@ -166,6 +167,11 @@
   <div class="sheet" id="detBody"></div>
 </div>
 
+<div id="sched">
+  <div class="dbackdrop" id="schBackdrop"></div>
+  <div class="sheet" id="schBody"></div>
+</div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const $=s=>document.querySelector(s); const RS="\u001e";
@@ -177,6 +183,8 @@ let favs=[], alertsOn=false, alertRadius=500;
 let prevStatus={}, approachFired={}, ac=null;
 let routeLayer=null, stopLayers=[], routeCache={};
 let meuPonto=null, pontoMarker=null, detailId=null;
+let paradasCache=null, varrendo=false, schUpcoming=true, pickMode=false;
+const PONTO_RAIO=200; // metros: paradas dentro desse raio contam como "o seu ponto"
 let ROTAS_DATA="18/11 (embutida)";
 let ROTAS={"10194":[{"n":"05:30 (01) CENTRO VIA ALTO IDA","i":"05:28:00","f":"06:28:00","se":1},{"n":"06:30 (01) BARRA VIA ALTO VOLTA","i":"06:30:00","f":"07:55:00","se":2},{"n":"08:00 (01) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"08:00:00","f":"09:45:00","se":1},{"n":"10:00 (01) BARRA VIA J.BOTÂNICO VOLTA","i":"10:00:00","f":"11:26:00","se":2},{"n":"12:20 (01) CENTRO VIA J. BOTÂNICO IDA","i":"12:18:00","f":"14:22:00","se":1},{"n":"14:30 (01) BARRA VIA ALTO VOLTA","i":"14:30:00","f":"15:55:00","se":2},{"n":"16:30 (01) CENTRO VIA COPA. IDA","i":"16:30:00","f":"17:50:00","se":1},{"n":"18:20 (01) BARRA VIA COPA VOLTA","i":"18:20:00","f":"19:30:00","se":2},{"n":"20:10 (01) CIRC. SHOPPING SEG. A SEXTA","i":"20:10:00","f":"21:10:00","se":3}],"10123":[{"n":"05:40 (02) TIJ.CIR/UERJ. - IDA","i":"05:39:00","f":"06:38:00","se":1},{"n":"06:40 (02) TIJ.CIR/UERJ. - VOLTA","i":"06:39:00","f":"07:58:00","se":2},{"n":"08:00 (02) CIRC. SHOPPING CEO SEG. A SEXTA.","i":"08:00:00","f":"09:14:00","se":3},{"n":"09:15 (02) CIRC. SHOPPING SEG. A SEXTA","i":"09:15:00","f":"10:54:00","se":3},{"n":"11:00 (02) CIRC. SHOPPING SEG. A SEXTA","i":"11:00:00","f":"11:57:00","se":3},{"n":"12:00 (02) J. OCEÂNICO/BARRINHA","i":"12:00:00","f":"12:45:00","se":3},{"n":"13:00 (02) CENTRO VIA COPA IDA","i":"13:00:00","f":"14:20:00","se":1},{"n":"17:20 (02) BARRA VIA J.BOTÂNICO VOLTA","i":"17:20:00","f":"18:30:00","se":2}],"10124":[{"n":"06:00 (03) CENTRO VIA COPA / NIEM EXPRESSO IDA","i":"05:59:00","f":"07:08:00","se":1},{"n":"07:00 (03) BARRA VIA J.BOTÂNICO VOLTA","i":"07:00:00","f":"08:00:00","se":2},{"n":"08:10 (03) CENTRO VIA COPA NIEM EXPRESSO IDA","i":"08:10:00","f":"09:55:00","se":1},{"n":"10:50 (06) BARRA VIA J.BOTÂNICO VOLTA","i":"10:50:00","f":"12:30:00","se":2},{"n":"12:40 (06) J. OCEÂNICO/BARRINHA.","i":"12:40:00","f":"13:25:00","se":3},{"n":"13:30 (05) CENTRO VIA ALTO IDA","i":"13:29:00","f":"14:50:00","se":1},{"n":"17:00 (06) BARRA VIA COPA VOLTA","i":"17:00:00","f":"18:20:00","se":2},{"n":"18:30 (06) CENTRO VIA COPA IDA","i":"18:30:00","f":"19:50:00","se":1},{"n":"20:10 (06) BARRA VIA COPA VOLTA","i":"20:10:00","f":"21:40:00","se":2}],"11170":[{"n":"06:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"06:00:00","f":"06:25:00","se":3},{"n":"06:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"06:30:00","f":"06:55:00","se":3},{"n":"07:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"07:00:00","f":"07:25:00","se":3},{"n":"07:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"07:30:00","f":"07:55:00","se":3},{"n":"08:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"08:00:00","f":"08:25:00","se":3},{"n":"08:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"08:30:00","f":"08:55:00","se":3},{"n":"09:00 (13) CIRC. METRÔ/J. OCEÂNICO","i":"09:00:00","f":"09:25:00","se":3},{"n":"09:30 (13) CIRC. METRÔ/J. OCEÂNICO","i":"09:30:00","f":"09:55:00","se":3},{"n":"10:15 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"10:15:00","f":"11:40:00","se":3},{"n":"12:30 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"12:30:00","f":"13:50:00","se":3},{"n":"14:30 (13) CIRC. SHOPPING SEG. A SEXTA MICRO","i":"14:30:00","f":"15:45:00","se":3}],"10188":[{"n":"06:05 (04) CENTRO VIA ALTO EXPRESSO IDA","i":"06:04:00","f":"07:19:00","se":1},{"n":"07:20 (04) BARRA VIA ALTO VOLTA","i":"07:20:00","f":"08:43:00","se":2},{"n":"08:45 (04) CENTRO VIA ALTO EXPRESSO IDA","i":"08:45:00","f":"10:15:00","se":1},{"n":"10:30 (04) BARRA VIA ALTO VOLTA","i":"10:25:00","f":"11:55:00","se":2},{"n":"12:00 (04) CENTRO VIA COPACABANA IDA","i":"12:00:00","f":"14:03:00","se":1},{"n":"15:30 (04) BARRA VIA J.BOTÂNICO VOLTA","i":"15:30:00","f":"16:55:00","se":2},{"n":"17:40 (04) B.SHOPPING/MERGULHÃO/N. LEBLON","i":"17:40:00","f":"19:30:00","se":3}],"10193":[{"n":"06:10 (05) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:10:00","f":"07:30:00","se":1},{"n":"08:20 (05) CENTRO VIA COPA EXPRESSO IDA","i":"08:20:00","f":"10:04:00","se":1},{"n":"10:20 (05) BARRA VIA COPA VOLTA","i":"10:19:00","f":"12:00:00","se":2},{"n":"12:15 (05) ALFA BARRA/P. ROSAS/N.LEBLON","i":"12:14:00","f":"13:25:00","se":3},{"n":"14:00 (06) CENTRO VIA J.BOTÂNICO IDA","i":"14:00:00","f":"14:55:00","se":1},{"n":"17:45 (05) BARRA VIA ALTO VOLTA","i":"17:45:00","f":"18:50:00","se":2}],"10176":[{"n":"06:20 (09) J. OCEÂNICO/BARRINHA","i":"06:20:00","f":"06:55:00","se":3},{"n":"07:00 (09) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:59:00","f":"08:34:00","se":1},{"n":"09:30 (08) CENTRO VIA COPA EXPRESSO IDA","i":"09:30:00","f":"11:05:00","se":1},{"n":"13:00 (09) BARRA VIA J.BOTÂNICO VOLTA","i":"13:00:00","f":"14:30:00","se":2},{"n":"15:10 (09) COLÉGIO ISRAELITA (BARRINHA)","i":"15:10:00","f":"15:50:00","se":3},{"n":"16:00 (09) CENTRO VIA ALTO IDA","i":"16:00:00","f":"17:25:00","se":1},{"n":"18:15 (09) BARRA VIA J.BOTÂNICO. VOLTA","i":"18:15:00","f":"19:30:00","se":2}],"8469":[{"n":"06:20 (12) ALFA BARRA/P. ROSAS/N. LEBLON","i":"06:19:00","f":"07:10:00","se":3},{"n":"07:50 (12) CENTRO VIA COPA/NIEM EXPRESSO IDA","i":"07:50:00","f":"09:00:00","se":1},{"n":"09:10 (12) BARRA VIA J.BOTÂNICO VOLTA","i":"09:10:00","f":"10:40:00","se":2},{"n":"10:45 (12) CENTRO VIA J. BOTÂNICO IDA","i":"10:45:00","f":"12:35:00","se":1},{"n":"12:45 (12) BARRA VIA COPA VOLTA","i":"12:45:00","f":"14:15:00","se":2},{"n":"14:30 (12) CENTRO VIA COPA IDA","i":"14:28:00","f":"16:00:00","se":1},{"n":"16:15 (12) BARRA VIA COPA. VOLTA","i":"16:15:00","f":"18:00:00","se":2},{"n":"18:40 (12) CIRC. SHOPPING SEG. A SEXTA","i":"18:40:00","f":"19:37:00","se":3},{"n":"19:40 (12) CENTRO VIA COPA IDA","i":"19:40:00","f":"20:50:00","se":1},{"n":"21:30 (12) BARRA UERJ/ VIA COPA VOLTA","i":"21:30:00","f":"23:00:00","se":2}],"10192":[{"n":"06:25 (10) NOVO LEBLON PISTA INTERNA","i":"06:25:00","f":"07:00:00","se":3},{"n":"07:15 (10) CENTRO VIA COPA EXPRESSO IDA","i":"07:14:00","f":"08:45:00","se":1},{"n":"09:20 (10) BARRA VIA COPA VOLTA","i":"09:20:00","f":"10:50:00","se":2},{"n":"11:00 (10) CENTRO VIA ALTO IDA","i":"11:00:00","f":"12:25:00","se":1},{"n":"16:00 (10) BARRA VIA ALTO VOLTA","i":"16:00:00","f":"17:25:00","se":2},{"n":"18:00 (10) CENTRO VIA ALTO IDA","i":"18:00:00","f":"19:05:00","se":1},{"n":"19:40 (10) BARRA VIA J.BOTÂNICO VOLTA","i":"19:40:00","f":"20:40:00","se":2}],"8677":[{"n":"06:30 (06) CENTRO COPA/NIEM EXPRESSO IDA","i":"06:29:00","f":"07:46:00","se":1},{"n":"07:45 (06) BARRA VIA COPA VOLTA","i":"07:45:00","f":"08:55:00","se":2},{"n":"09:15 (06) CENTRO VIA COPA NIEM EXPRESSO IDA","i":"09:15:00","f":"10:40:00","se":1},{"n":"11:15 (03) BARRA VIA COPA VOLTA","i":"11:15:00","f":"12:25:00","se":2}],"10106":[{"n":"06:40 (07) CENTRO VIA J. BOTÂNICO EXPRESSO IDA","i":"06:39:00","f":"08:13:00","se":1},{"n":"09:00 (07) CENTRO VIA J.BOTÂNICO EXPRESSO IDA","i":"09:00:00","f":"10:25:00","se":1},{"n":"15:00 (07) BARRA VIA COPA VOLTA","i":"15:00:00","f":"16:20:00","se":2},{"n":"17:00 (07) CENTRO VIA COPA IDA","i":"17:00:00","f":"18:00:00","se":1},{"n":"18:50 (07) BARRA VIA COPA VOLTA","i":"18:50:00","f":"20:20:00","se":2}],"498":[{"n":"06:50 (08) CENTRO VIA ALTO EXPRESSO IDA","i":"06:49:00","f":"08:24:00","se":1},{"n":"09:40 (09) CENTRO VIA ALTO EXPRESSO IDA","i":"09:40:00","f":"11:03:00","se":1},{"n":"12:20 (08) BARRA VIA ALTO VOLTA","i":"12:19:00","f":"14:00:00","se":2},{"n":"15:30 (08) CIRC. SHOPPING SEG. A SEXTA","i":"15:30:00","f":"16:30:00","se":3},{"n":"17:00 (08) CENTRO VIA ALTO IDA","i":"17:00:00","f":"18:20:00","se":1},{"n":"18:40 (08) BARRA VIA ALTO VOLTA","i":"18:40:00","f":"20:00:00","se":2}],"8470":[{"n":"07:30 (11) CENTRO VIA ALTO EXP. IDA","i":"07:30:00","f":"08:50:00","se":1},{"n":"09:00 (11) BARRA VIA ALTO VOLTA","i":"08:59:00","f":"10:30:00","se":2},{"n":"11:50 (11) N. LEBLON/ B. MALL PISTA CENTRAL","i":"11:50:00","f":"12:30:00","se":3},{"n":"12:50 (11) BARRA MALL/CEC/BARRASHOPPING","i":"12:49:00","f":"14:10:00","se":3},{"n":"15:00 (11) CENTRO VIA J. BOTÂNICO IDA","i":"15:00:00","f":"16:20:00","se":1},{"n":"17:10 (11) BARRA VIA ALTO VOLTA","i":"17:10:00","f":"18:20:00","se":2},{"n":"18:40 (11) CENTRO VIA ALTO IDA","i":"18:40:00","f":"20:00:00","se":1},{"n":"20:20 (11) BARRA VIA ALTO VOLTA","i":"20:20:00","f":"21:50:00","se":2}],"0":[{"n":"08:15 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"09:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"10:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"12:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"13:30 (03) CIRC. SHOPPING CEO SEG. A SEXTA.","i":null,"f":null,"se":3},{"n":"13:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"14:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"14:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO.","i":null,"f":null,"se":3},{"n":"16:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"16:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"17:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"17:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"18:30 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"18:30 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"20:00 (04) CIRC. SHOPPING SOMENTE DOMINGO.","i":null,"f":null,"se":3},{"n":"21:00 (04) CIRC. SHOPPING SOMENTE SÁB E FERIADO","i":null,"f":null,"se":3},{"n":"PORTARIA CANAL ABM","i":null,"f":null,"se":3},{"n":"PORTARIA SEDE ABM","i":null,"f":null,"se":3},{"n":"TESTE ORBITAL","i":null,"f":null,"se":3},{"n":"15:30 (03) CENTRO VIA COPA IDA","i":"15:30:00","f":"16:50:00","se":1},{"n":"17:45 (03) BARRA VIA COPA VOLTA","i":"17:45:00","f":"18:50:00","se":2}]};
 async function testRotas(){
@@ -507,6 +515,85 @@ function pontoPerto(){
   if(best)setPonto(best.latitude,best.longitude,best.nome);
 }
 
+// ---------- varredura de paradas de todas as linhas (cache) ----------
+function loadParadasCache(){try{const c=JSON.parse(localStorage.getItem("frota_paradas")||"null");
+  if(c&&c.day===new Date().toDateString())paradasCache=c;}catch(e){}}
+async function varrerParadas(force){
+  if(varrendo)return;
+  let proxy=$("#rotasProxy").value.trim(); if(!proxy){toast("precisa do Worker configurado");return;}
+  if(!/^https?:\/\//i.test(proxy))proxy="https://"+proxy;
+  const day=new Date().toDateString();
+  if(!paradasCache||paradasCache.day!==day)paradasCache={day,rotas:{}};
+  // ids únicos das rotas de hoje
+  const seen={},ids=[];
+  for(const vid in ROTAS)for(const t of ROTAS[vid])if(t.id&&!seen[t.id]){seen[t.id]=1;ids.push(t.id);}
+  if(!ids.length){toast("conecte/carregue a grade primeiro");return;}
+  const falta=force?ids:ids.filter(id=>!paradasCache.rotas[id]);
+  if(!falta.length){toast("horários já em cache");renderSched();return;}
+  varrendo=true; renderSched();
+  const CH=40;
+  try{
+    for(let i=0;i<falta.length;i+=CH){
+      const batch=falta.slice(i,i+CH).join(",");
+      const r=await fetch(proxy+(proxy.includes("?")?"&":"?")+"rotas="+batch,{cache:"no-store"});
+      const map=await r.json();
+      for(const id in map)if(map[id]&&map[id].paradas)paradasCache.rotas[id]=map[id];
+      try{localStorage.setItem("frota_paradas",JSON.stringify(paradasCache));}catch(e){}
+      toast("carregando horários… "+Math.min(i+CH,falta.length)+"/"+falta.length);
+      renderSched();
+    }
+    toast("horários prontos");
+  }catch(e){log("varredura falhou: "+e.message);toast("falha ao carregar horários");}
+  varrendo=false; renderSched();
+}
+// horários que passam no meu ponto (todas as linhas no cache, dentro do raio)
+function horariosDoPonto(){
+  if(!meuPonto||!paradasCache)return[];
+  const out=[];
+  for(const id in paradasCache.rotas){const r=paradasCache.rotas[id];
+    for(const p of (r.paradas||[])){
+      if(!p.h)continue;
+      if(distM(meuPonto.lat,meuPonto.lng,p.lat,p.lng)<=PONTO_RAIO)
+        out.push({h:p.h,linha:r.n,parada:p.nome});
+    }}
+  out.sort((a,b)=>a.h.localeCompare(b.h));
+  return out;
+}
+function openSched(){$("#sched").classList.add("open");
+  if(!paradasCache)loadParadasCache();
+  if(!paradasCache&&meuPonto)varrerParadas(false);
+  renderSched();}
+function closeSched(){$("#sched").classList.remove("open");}
+function renderSched(){
+  if(!$("#sched").classList.contains("open"))return;
+  let h=`<div class="dh"><b>Horários no ponto</b>
+    <button class="info" id="schClose" style="margin-left:auto;font-size:18px">✕</button></div>`;
+  if(!meuPonto){
+    h+=`<div class="drow">Defina seu ponto primeiro:<br>• toque em <b>"escolher no mapa"</b> abaixo e toque no local, ou<br>• num ônibus toque em ⓘ → uma parada.
+      <div style="margin-top:8px"><button class="btn sec dbtn" id="schPick">escolher no mapa</button></div></div>`;
+    $("#schBody").innerHTML=h; return;
+  }
+  const now=hhmmNow().slice(0,5);
+  let lista=horariosDoPonto();
+  const totalCache=paradasCache?Object.keys(paradasCache.rotas).length:0;
+  h+=`<div class="drow"><div class="dlbl">Ponto</div>${meuPonto.nome||"ponto"} <span class="stt">· raio ${PONTO_RAIO} m</span>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn sec dbtn" id="schPick">trocar ponto</button>
+      <button class="btn sec dbtn" id="schUpd">${varrendo?"atualizando…":"atualizar horários"}</button>
+      <button class="btn sec dbtn" id="schTog">${schUpcoming?"mostrar dia todo":"só próximos"}</button>
+    </div><div class="stt" style="margin-top:6px">${totalCache} viagens no cache${varrendo?" · carregando…":""}</div></div>`;
+  if(schUpcoming)lista=lista.filter(x=>x.h>=now);
+  if(!lista.length){
+    h+=`<div class="drow">${totalCache?"nenhum horário "+(schUpcoming?"próximo ":"")+"neste ponto":"toque em 'atualizar horários' pra carregar"}</div>`;
+  }else{
+    h+=`<div class="drow"><div class="dlbl">${schUpcoming?"próximos":"dia todo"} (${lista.length})</div>`+
+      lista.map(x=>`<div class="sline"><span>${x.h}</span> ${x.linha} ${x.h>=now?"":'<span class="stt" style="margin-left:auto">passou</span>'}</div>`).join("")+`</div>`;
+  }
+  $("#schBody").innerHTML=h;
+}
+function armarPick(){pickMode=true;closeSched();toast("Toque no mapa pra marcar seu ponto");}
+
+
 let rxbuf="";  // buffer: SignalR records terminam em RS e podem vir fragmentados em vários frames
 function handle(text){
   rxbuf+=text;
@@ -577,10 +664,18 @@ $("#alertToggle").onclick=async()=>{
   save();
 };
 $("#testRotas").onclick=()=>{$("#log").closest("details").open=true;testRotas();};
+$("#schedBtn").onclick=openSched;
+$("#sched").addEventListener("click",e=>{
+  if(e.target.id==="schClose"||e.target.id==="schBackdrop"){closeSched();return;}
+  if(e.target.id==="schPick"){armarPick();return;}
+  if(e.target.id==="schUpd"){varrerParadas(true);return;}
+  if(e.target.id==="schTog"){schUpcoming=!schUpcoming;renderSched();return;}
+});
 tick=setInterval(renderList,15000); // refresh "há X min" + parado
 setInterval(loadRotas,300000);      // atualiza a grade a cada 5 min (se proxy configurado)
 
-load(); initMap(); drawPonto();
+load(); loadParadasCache(); initMap(); drawPonto();
+map&&map.on("click",e=>{ if(pickMode){pickMode=false;setPonto(e.latlng.lat,e.latlng.lng,"ponto no mapa");openSched();} });
 $("#alertRadiusInp").value=alertRadius;
 $("#alertToggle").textContent=alertsOn?"● alertas ligados":"○ alertas desligados";
 startGeo();  // já abre pedindo localização e centraliza em você
