@@ -546,18 +546,19 @@ async function varrerParadas(force){
   }catch(e){log("varredura falhou: "+e.message);toast("falha ao carregar horários");}
   varrendo=false; renderSched();
 }
-// horários que passam no meu ponto (todas as linhas no cache, dentro do raio)
-function horariosDoPonto(){
+// linhas que passam no meu ponto (todas no cache, dentro do raio) + quais estão ativas agora
+function cleanLinha(n){return (n||"").replace(/^\s*\d{1,2}:\d{2}\s*\(\d+\)\s*/,"").trim();}
+function linhasDoPonto(){
   if(!meuPonto||!paradasCache)return[];
-  const out=[];
+  const byLine={};
   for(const id in paradasCache.rotas){const r=paradasCache.rotas[id];
-    for(const p of (r.paradas||[])){
-      if(!p.h)continue;
-      if(distM(meuPonto.lat,meuPonto.lng,p.lat,p.lng)<=PONTO_RAIO)
-        out.push({h:p.h,linha:r.n,parada:p.nome});
-    }}
-  out.sort((a,b)=>a.h.localeCompare(b.h));
-  return out;
+    let hit=false;
+    for(const p of (r.paradas||[])){ if(p.lat!=null&&distM(meuPonto.lat,meuPonto.lng,p.lat,p.lng)<=PONTO_RAIO){hit=true;break;} }
+    if(hit){const lab=cleanLinha(r.n)||("rota "+id); (byLine[lab]=byLine[lab]||{linha:lab,viagens:0,ativa:false,veics:[]}).viagens++;}
+  }
+  // ativas agora, pelos ônibus ao vivo
+  for(const vid in vehicles){const ln=lineFor(vid); if(ln&&ln.status==="Executando"){const lab=cleanLinha(ln.nome); if(byLine[lab]){byLine[lab].ativa=true; if(!byLine[lab].veics.includes(vehicles[vid].num))byLine[lab].veics.push(vehicles[vid].num);}}}
+  return Object.values(byLine).sort((a,b)=>(b.ativa-a.ativa)||a.linha.localeCompare(b.linha));
 }
 function openSched(){$("#sched").classList.add("open");
   if(!paradasCache)loadParadasCache();
@@ -566,28 +567,28 @@ function openSched(){$("#sched").classList.add("open");
 function closeSched(){$("#sched").classList.remove("open");}
 function renderSched(){
   if(!$("#sched").classList.contains("open"))return;
-  let h=`<div class="dh"><b>Horários no ponto</b>
+  let h=`<div class="dh"><b>Linhas no ponto</b>
     <button class="info" id="schClose" style="margin-left:auto;font-size:18px">✕</button></div>`;
   if(!meuPonto){
     h+=`<div class="drow">Defina seu ponto primeiro:<br>• toque em <b>"escolher no mapa"</b> abaixo e toque no local, ou<br>• num ônibus toque em ⓘ → uma parada.
       <div style="margin-top:8px"><button class="btn sec dbtn" id="schPick">escolher no mapa</button></div></div>`;
     $("#schBody").innerHTML=h; return;
   }
-  const now=hhmmNow().slice(0,5);
-  let lista=horariosDoPonto();
+  const lista=linhasDoPonto();
+  const ativas=lista.filter(x=>x.ativa).length;
   const totalCache=paradasCache?Object.keys(paradasCache.rotas).length:0;
   h+=`<div class="drow"><div class="dlbl">Ponto</div>${meuPonto.nome||"ponto"} <span class="stt">· raio ${PONTO_RAIO} m</span>
     <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn sec dbtn" id="schPick">trocar ponto</button>
-      <button class="btn sec dbtn" id="schUpd">${varrendo?"atualizando…":"atualizar horários"}</button>
-      <button class="btn sec dbtn" id="schTog">${schUpcoming?"mostrar dia todo":"só próximos"}</button>
+      <button class="btn sec dbtn" id="schUpd">${varrendo?"atualizando…":"atualizar linhas"}</button>
     </div><div class="stt" style="margin-top:6px">${totalCache} viagens no cache${varrendo?" · carregando…":""}</div></div>`;
-  if(schUpcoming)lista=lista.filter(x=>x.h>=now);
   if(!lista.length){
-    h+=`<div class="drow">${totalCache?"nenhum horário "+(schUpcoming?"próximo ":"")+"neste ponto":"toque em 'atualizar horários' pra carregar"}</div>`;
+    h+=`<div class="drow">${totalCache?"nenhuma linha passa neste ponto (raio "+PONTO_RAIO+" m)":"toque em 'atualizar linhas' pra carregar"}</div>`;
   }else{
-    h+=`<div class="drow"><div class="dlbl">${schUpcoming?"próximos":"dia todo"} (${lista.length})</div>`+
-      lista.map(x=>`<div class="sline"><span>${x.h}</span> ${x.linha} ${x.h>=now?"":'<span class="stt" style="margin-left:auto">passou</span>'}</div>`).join("")+`</div>`;
+    h+=`<div class="drow"><div class="dlbl">${lista.length} linha(s) · ${ativas} ativa(s) agora</div>`+
+      lista.map(x=>`<div class="sline"><span style="min-width:0">${x.ativa?"🟢":"⚪"}</span>
+        <span style="min-width:0;flex:1;font-family:inherit;color:var(--txt)">${x.linha}</span>
+        ${x.ativa?`<span class="now">ativa${x.veics.length?" · "+x.veics.join(", "):""}</span>`:`<span class="stt">${x.viagens}× hoje</span>`}</div>`).join("")+`</div>`;
   }
   $("#schBody").innerHTML=h;
 }
