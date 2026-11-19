@@ -78,6 +78,10 @@
   .sline span{color:var(--muted);font-family:ui-monospace,Menlo,monospace;min-width:42px}
   .sline.par{cursor:pointer}.sline.par:active{background:var(--card)}
   .sline .now{margin-left:auto;color:var(--ok);font-weight:700}
+  .lrow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid rgba(42,47,58,.5)}
+  .lrow .lname{font-size:13px;color:var(--txt)}
+  .lrow .now{color:var(--ok);font-weight:700;font-size:12px}
+  .lrow .lsub{grid-column:2/4;font-size:11px;color:var(--muted)}
   .dbtn{width:auto;display:inline-block;padding:7px 11px;font-size:12px;font-weight:600}
   .stt{color:var(--muted)}
   @media(max-width:620px){
@@ -550,15 +554,20 @@ async function varrerParadas(force){
 function cleanLinha(n){return (n||"").replace(/^\s*\d{1,2}:\d{2}\s*\(\d+\)\s*/,"").trim();}
 function linhasDoPonto(){
   if(!meuPonto||!paradasCache)return[];
+  const now=hhmmNow().slice(0,5);
   const byLine={};
   for(const id in paradasCache.rotas){const r=paradasCache.rotas[id];
     let hit=false;
     for(const p of (r.paradas||[])){ if(p.lat!=null&&distM(meuPonto.lat,meuPonto.lng,p.lat,p.lng)<=PONTO_RAIO){hit=true;break;} }
-    if(hit){const lab=cleanLinha(r.n)||("rota "+id); (byLine[lab]=byLine[lab]||{linha:lab,viagens:0,ativa:false,veics:[]}).viagens++;}
+    if(hit){const lab=cleanLinha(r.n)||("rota "+id);
+      const o=byLine[lab]=byLine[lab]||{linha:lab,viagens:0,ativa:false,veics:[],saidas:[]};
+      o.viagens++;
+      const m=(r.n||"").match(/^\s*(\d{1,2}:\d{2})/); if(m)o.saidas.push(m[1]);}
   }
-  // ativas agora, pelos ônibus ao vivo
   for(const vid in vehicles){const ln=lineFor(vid); if(ln&&ln.status==="Executando"){const lab=cleanLinha(ln.nome); if(byLine[lab]){byLine[lab].ativa=true; if(!byLine[lab].veics.includes(vehicles[vid].num))byLine[lab].veics.push(vehicles[vid].num);}}}
-  return Object.values(byLine).sort((a,b)=>(b.ativa-a.ativa)||a.linha.localeCompare(b.linha));
+  const arr=Object.values(byLine);
+  arr.forEach(o=>{o.saidas.sort((a,b)=>a.localeCompare(b)); o.proxima=o.saidas.find(s=>s>=now)||null;});
+  return arr.sort((a,b)=>(b.ativa-a.ativa)||((a.proxima||"99")+"").localeCompare((b.proxima||"99")+"")||a.linha.localeCompare(b.linha));
 }
 function openSched(){$("#sched").classList.add("open");
   if(!paradasCache)loadParadasCache();
@@ -586,9 +595,14 @@ function renderSched(){
     h+=`<div class="drow">${totalCache?"nenhuma linha passa neste ponto (raio "+PONTO_RAIO+" m)":"toque em 'atualizar linhas' pra carregar"}</div>`;
   }else{
     h+=`<div class="drow"><div class="dlbl">${lista.length} linha(s) · ${ativas} ativa(s) agora</div>`+
-      lista.map(x=>`<div class="sline"><span style="min-width:0">${x.ativa?"🟢":"⚪"}</span>
-        <span style="min-width:0;flex:1;font-family:inherit;color:var(--txt)">${x.linha}</span>
-        ${x.ativa?`<span class="now">ativa${x.veics.length?" · "+x.veics.join(", "):""}</span>`:`<span class="stt">${x.viagens}× hoje</span>`}</div>`).join("")+`</div>`;
+      lista.map(x=>{
+        const right=x.ativa?`<span class="now">ativa${x.veics.length?" · "+x.veics.join(", "):""}</span>`
+          :x.proxima?`<span class="stt">saída ${x.proxima}</span>`:`<span class="stt">encerrada</span>`;
+        return `<div class="lrow"><span class="dot">${x.ativa?"🟢":"⚪"}</span>
+          <span class="lname">${x.linha}</span>${right}
+          <span class="lsub">${x.viagens} saída(s) hoje${x.proxima?" · próxima "+x.proxima:""}</span></div>`;
+      }).join("")+`</div>`;
+    h+=`<div class="stt" style="padding-top:8px">"saída" é o horário em que a linha parte do início — o ônibus chega ao seu ponto um pouco depois.</div>`;
   }
   $("#schBody").innerHTML=h;
 }
