@@ -82,6 +82,13 @@
   .lrow .lname{font-size:13px;color:var(--txt)}
   .lrow .now{color:var(--ok);font-weight:700;font-size:12px}
   .lrow .lsub{grid-column:2/4;font-size:11px;color:var(--muted)}
+  .lrow.act{cursor:pointer}.lrow.act:active{background:var(--card)}
+  #wait{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px calc(env(safe-area-inset-top) + 24px);background:var(--bg);z-index:10002}
+  #wait.open{display:flex}
+  #wait .wline{font-size:16px;color:var(--muted);font-weight:600;max-width:90%}
+  #wait .wbig{font-size:64px;font-weight:800;color:var(--accent);margin:14px 0 6px}
+  #wait .wsub{font-size:15px;color:var(--txt)}
+  #wait .wmeta{font-size:13px;color:var(--muted);margin-top:10px}
   .dbtn{width:auto;display:inline-block;padding:7px 11px;font-size:12px;font-weight:600}
   .stt{color:var(--muted)}
   @media(max-width:620px){
@@ -176,6 +183,8 @@
   <div class="sheet" id="schBody"></div>
 </div>
 
+<div id="wait"><div id="waitBody"></div></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const $=s=>document.querySelector(s); const RS="\u001e";
@@ -186,7 +195,7 @@ let userPos=null, userMarker=null, follow=false, lineFilter="";
 let favs=[], alertsOn=false, alertRadius=500;
 let prevStatus={}, approachFired={}, ac=null;
 let routeLayer=null, stopLayers=[], routeCache={};
-let meuPonto=null, pontoMarker=null, detailId=null;
+let meuPonto=null, pontoMarker=null, detailId=null, waitingId=null, waitFired=false;
 let paradasCache=null, varrendo=false, schUpcoming=true, pickMode=false;
 const PONTO_RAIO=200; // metros: paradas dentro desse raio contam como "o seu ponto"
 let ROTAS_DATA="18/11 (embutida)";
@@ -263,6 +272,7 @@ async function loadTrajeto(rotaId){
     let d=routeCache[rotaId];
     if(!d){ const r=await fetch(url+(url.includes("?")?"&":"?")+"rota="+encodeURIComponent(rotaId),{cache:"no-store"}); d=await r.json(); routeCache[rotaId]=d; }
     if(rotaId===(selected!=null&&lineFor(selected)&&lineFor(selected).id)){drawRoute(d);renderDetail();}
+    renderWait();
   }catch(e){log("trajeto falhou: "+e.message);}
 }
 
@@ -278,6 +288,35 @@ function etaPonto(id){
   if(pi<=bi)return{passou:true};
   const dist=routeLen(pts,bi,pi), spd=v.speed>5?v.speed:16;
   return{dist,min:Math.max(1,Math.round(dist/1000/spd*60))};
+}
+function etaClock(min){const d=new Date(Date.now()+min*60000);return d.toTimeString().slice(0,5);}
+// ---------- modo esperando ----------
+function vidPorPrefixo(num){for(const vid in vehicles)if(String(vehicles[vid].num)===String(num))return vid;return null;}
+function startWait(id){
+  if(id==null)return;
+  if(!meuPonto){toast("defina seu ponto primeiro");openSched();return;}
+  waitingId=id; waitFired=false;
+  const ln=lineFor(id); if(ln&&ln.id)loadTrajeto(ln.id);
+  closeSched(); closeDetail();
+  $("#wait").classList.add("open"); renderWait();
+}
+function stopWait(){waitingId=null;$("#wait").classList.remove("open");}
+function renderWait(){
+  if(!$("#wait").classList.contains("open"))return;
+  const id=waitingId, v=vehicles[id];
+  if(!v){$("#waitBody").innerHTML=`<div class="wbig">—</div><div class="wsub">ônibus sem posição no momento…</div><button class="btn sec" id="waitStop" style="margin-top:20px">parar</button>`;return;}
+  const ln=lineFor(id), eta=etaPonto(id);
+  let big,sub;
+  if(!trajetoDe(id)){big="…";sub="carregando trajeto";}
+  else if(!eta){big="—";sub="sem trajeto";}
+  else if(eta.passou){big="já passou";sub="o ônibus passou do seu ponto";}
+  else{big=`~${eta.min} min`;sub=`${fmtDist(eta.dist)} pela rota · chega ~${etaClock(eta.min)}`;}
+  $("#waitBody").innerHTML=`
+    <div class="wline">${ln?ln.nome:"linha"}</div>
+    <div class="wbig">${big}</div>
+    <div class="wsub">${sub}</div>
+    <div class="wmeta">ônibus ${v.num} · ${Math.round(v.speed||0)} km/h${v.driver?" · "+v.driver:""}</div>
+    <button class="btn sec" id="waitStop" style="margin-top:22px">parar de esperar</button>`;
 }
 function atrasoDe(id){
   const d=trajetoDe(id),v=vehicles[id];if(!d||!v||!d.paradas)return null;
@@ -402,6 +441,11 @@ function upsert(v){
   if(follow&&sel&&map)map.panTo([v.lat,v.lng]);
   checkAlerts(id);
   if(detailId===id&&$("#detail").classList.contains("open"))renderDetail();
+  if(waitingId===id){renderWait();
+    const et=etaPonto(id);
+    if(et&&!et.passou&&(et.dist<=alertRadius||et.min<=2)){ if(!waitFired){waitFired=true;notify("Ônibus chegando ao ponto", v.num+" · ~"+et.min+" min");} }
+    else if(et&&et.dist>alertRadius*1.4) waitFired=false;
+  }
   renderList();
 }
 
@@ -479,7 +523,8 @@ function renderDetail(){
   const d=trajetoDe(id);
   let h=`<div class="dh"><b>${v.num}</b> <span class="plate">${v.plate||""}</span>
     <button class="info" id="detClose" style="margin-left:auto;font-size:18px">✕</button></div>`;
-  h+=`<div class="drow">${ln?`<b>${ln.nome}</b><br><span class="stt">${ln.status} · ${({1:"ida",2:"volta",3:"circular"})[ln.se]||""}</span>`:"linha não identificada"}</div>`;
+  h+=`<div class="drow">${ln?`<b>${ln.nome}</b><br><span class="stt">${ln.status} · ${({1:"ida",2:"volta",3:"circular"})[ln.se]||""}</span>`:"linha não identificada"}
+    <div style="margin-top:8px"><button class="btn sec dbtn" id="detWait">esperar este ônibus</button></div></div>`;
   // chegada ao meu ponto
   if(meuPonto){
     let txt;
@@ -508,6 +553,7 @@ $("#detail").addEventListener("click",e=>{
   if(e.target.id==="detClose"||e.target.id==="detBackdrop"){closeDetail();return;}
   if(e.target.id==="limparPonto"){limparPonto();return;}
   if(e.target.id==="pontoPerto"){pontoPerto();return;}
+  if(e.target.id==="detWait"){startWait(detailId);return;}
   const par=e.target.closest(".par");
   if(par){setPonto(par.dataset.lat,par.dataset.lng,par.dataset.nome);}
 });
@@ -598,9 +644,11 @@ function renderSched(){
       lista.map(x=>{
         const right=x.ativa?`<span class="now">ativa${x.veics.length?" · "+x.veics.join(", "):""}</span>`
           :x.proxima?`<span class="stt">saída ${x.proxima}</span>`:`<span class="stt">encerrada</span>`;
-        return `<div class="lrow"><span class="dot">${x.ativa?"🟢":"⚪"}</span>
+        const waitAttr=x.ativa&&x.veics.length?` act" data-wait="${x.veics[0]}`:"";
+        const sub=x.ativa?`${x.viagens} saída(s) hoje · toque para esperar`:`${x.viagens} saída(s) hoje${x.proxima?" · próxima "+x.proxima:""}`;
+        return `<div class="lrow${waitAttr}"><span class="dot">${x.ativa?"🟢":"⚪"}</span>
           <span class="lname">${x.linha}</span>${right}
-          <span class="lsub">${x.viagens} saída(s) hoje${x.proxima?" · próxima "+x.proxima:""}</span></div>`;
+          <span class="lsub">${sub}</span></div>`;
       }).join("")+`</div>`;
     h+=`<div class="stt" style="padding-top:8px">"saída" é o horário em que a linha parte do início — o ônibus chega ao seu ponto um pouco depois.</div>`;
   }
@@ -684,8 +732,10 @@ $("#sched").addEventListener("click",e=>{
   if(e.target.id==="schClose"||e.target.id==="schBackdrop"){closeSched();return;}
   if(e.target.id==="schPick"){armarPick();return;}
   if(e.target.id==="schUpd"){varrerParadas(true);return;}
-  if(e.target.id==="schTog"){schUpcoming=!schUpcoming;renderSched();return;}
+  const row=e.target.closest(".lrow.act");
+  if(row&&row.dataset.wait){const vid=vidPorPrefixo(row.dataset.wait); if(vid!=null)startWait(vid); return;}
 });
+$("#wait").addEventListener("click",e=>{ if(e.target.id==="waitStop")stopWait(); });
 tick=setInterval(renderList,15000); // refresh "há X min" + parado
 setInterval(loadRotas,300000);      // atualiza a grade a cada 5 min (se proxy configurado)
 
